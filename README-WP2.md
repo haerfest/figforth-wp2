@@ -237,6 +237,74 @@ Memory address 88DDh contains the block number of the head of the list. After
 an application (such as fig-FORTH) has run, the BIOS sets the head to block
 160h, which is RAM address AC00h or the application load address.
 
+### Impact on fig-FORTH
+
+Understanding the memory allocation was important because I wanted fig-FORTH
+to play nicely with the BIOS. I.e., you should be able to return gracefully
+to the system without needing a reboot.
+
+When fig-FORTH is loaded by the BIOS, starting at address AC00h, and ending
+about 7 Kb (the size of the `figforth.ex` binary) later, the BIOS immediately
+places its memory administration head node there!
+
+Also, at the top of RAM there seems to be some space used for the resident
+document or a RAM disk on the internal 32 Kb SRAM (not sure):
+
+    +-----------+ FFFFh
+    | RAM disk? |
+    +-----------+
+    |           |
+    /           /
+    |           |
+    +-----------+
+    | head node |
+    +-----------+
+    |           |
+    | fig-FORTH |
+    |           |
+    +-----------+ AC00h
+    |           |
+    /           /
+    |           |
+    +-----------+ 0000h
+
+This means I cannot simply assume all subsequent RAM is available to me: the head node
+sits in the middle, so I have to step over it, and there may be memory used at the top,
+not in the least the administration of the end of the malloc list itself.
+
+Therefore, upon initializing fig-FORTH (a cold start, there is no way to perform a
+warm start as of yet), I ask the BIOS to give me all available memory by invoking
+`MALLOC` with HL set to zero. On exit, HL will point to the beginning of this data,
+and DE will contain the number of 32-byte blocks allocated to me. From these I can
+deduce what fig-FORTH can use, for example:
+
+    +-----------+ FFFFh
+    | RAM disk? |
+    +-----------+
+    | allocated |
+    |    to     |
+    | fig-FORTH |
+    +-----------+
+    | head node |
+    +-----------+
+    |           |
+    | fig-FORTH |
+    |           |
+    +-----------+ AC00h
+    |           |
+    /           /
+    |           |
+    +-----------+ 0000h
+
+It then proceeds to set a few user variables to remember not to step outside these
+boundaries:
+
+User variable | Need to set because...
+--------------|-----------------------
+`LIMIT`       | Don't want to cross upper boundary of allocated RAM.
+`DP`          | User dictionary starts at beginning of allocated RAM, beyond head node.
+`FENCE`       | Cannot forget below initial `DP`, although may not be necessary?
+
 ## ROM Version
 
 My Tandy WP-2 reports the following ROM versions:
