@@ -1,7 +1,53 @@
+# Tandy WP-2 fig-FORTH 1.3c
+
+This is a port of [Z80 fig-FORTH 1.3c](https://github.com/dimitrit/figforth) (SHA 3c4e672) to the
+[Tandy WP-2 Portable Wordprocessor](http://tandy.wiki/WP-2).
+
+## Installation
+
+What you will need to run this:
+
+1. A Tandy WP-2.
+2. A modern computer with a serial port.
+3. A null-modem cable to connect the two.
+4. A [Tandy Portable Disk Drive server](http://tandy.wiki/TPDD_server) to serve the file.
+
+Then:
+
+1. On your modern computer, start your TPDD server of choice, making sure it serves the directory with the `figforth.ex` file.
+2. On the WP-2, from inside the Wordprocessor application, start the `FILES` application (`F2` + `=`).
+3. Use the arrow keys left/right to highlight `DISKETTE` and press `Enter`.
+4. Use the arrow keys up/down to highlight `figforth.ex` and press `F2` + `7` (RUN).
+
+After a few seconds of transferring the binary over, the Forth prompt should appear:
+
+![Forth Prompt](img/forth-wp2.jpg)
+
+## Tips
+
+You can go back to the `FILES` application by entering `BYE`.
+
+Highly recommended is to install a [128 Kb SRAM memory upgrade](http://tandy.wiki/WP-2#RAM_Disk)
+in the WP-2 to act as a RAM drive. You can then copy the executable to it and run it from there
+while on the go :)
+
+## Storage
+
+The storage interface at the moment only supports the "Drive A", i.e., the (TPDD) floppy drive.
+
+Each screen of 1,024 bytes is stored in a single file named `SCRN????.FTH`, where the `????` is the zero-padded screen number in hexadecimal. This allows in theory for up to 65,536 screens.
+
+## Notes
+
+See [`README-WP2.md`](README-WP2.md) for notes regarding porting fig-FORTH to the WP-2.
+
+_(Original README contents follow.)_
+
 # Z80 fig-FORTH 1.3
 
 > <h2><i>figForth Refuses to Die<sup>1</sup></i></h2>   
 <br/>    
+
 A fig-FORTH<sup>2</sup> implementation for the Z80 that can be built using TASM<sup>3</sup>:
    
 ```
