@@ -1,7 +1,8 @@
-;  CP/M DISC INTERFACE
+;  TANDY WP-2 DISC INTERFACE
 ;
 ; Last update:
 ;
+; 220511 - ported to Tandy WP-2
 ; 201212 - added FILE
 ; 881228 - EXTEND's R/W address now initialized with blanks
 ; 860120 - EXTEND's R/W address now HERE, was Osborne video ram
@@ -10,34 +11,23 @@
 ; 840812 - added EXTEND
 ; 840731 - installed BDOS calls
 ;
+;	Tandy WP-2 BIOS functions used by the disc interface
 ;
-; CP/M BDOS CALLS USED (as per Albert van der Horst, HCCH)
+OPEN	.EQU	0188h		;open a file
+READ	.EQU	018Bh		;read a file
+WRITE	.EQU	018Eh		;write a file
+CLOSE	.EQU	0191h		;close a file
 ;
-; R/W reads or writes a sector in the file specified when invoking
-; Z80 fig-FORTH (A>Z80FORTH d:filename.ext), using the default FCB.
-; More than one disc may be accessed by temporary use of a user de-
-; fined FCB.
+;	The File Control Block (FCB) used to communicate with the Tandy WP-2's
+;	BIOS functions. Since the WP-2's BIOS does not appear to support random
+;	access on most devices, we cannot combine multiple screens in a single
+;	file, as the CP/M implementation did. Therefore we use one file per
+;	screen, of exactly 1,024 bytes, named SCRN0000.FTH up to SCRNFFFF.FTH.
 ;
-;
-;
-#IFDEF WP2
-DEFFCB:	.BYTE	011h		;W device (1=memory, 2=internal RAM disk, 3=IC RAM, 11h=drive A)
-	.TEXT	"SCRNXXXX.FTH"	;W filename, not zero-terminated
-	.WORD	16*64		;W one screen size
-	.BLOCK	17		;W reserved
-#ELSE
-DEFFCB	.EQU	005CH		;default FCB
-#ENDIF
-;
-;	CP/M FUNCTIONS
-;
-OPNFIL	.EQU	0FH		;open file
-CLSFIL	.EQU	10H		;close file
-SETDMA	.EQU	1AH		;set DMA address
-WRTRND	.EQU	22H		;write random
-;
-MAXLEN	.EQU	08H		;max filename length
-FTLEN	.EQU	03H		;filetype length
+DEFFCB:	.BYTE	011h		;device (1=memory, 2=internal RAM disk, 3=IC RAM, 11h=drive A)
+	.TEXT	"SCRN????.FTH"	;filename, not zero-terminated; supports up to 64K screens
+	.WORD	16*64		;one screen size
+	.BLOCK	17		;reserved
 ;
 ;	FORTH variables & constants used in disc interface
 ;
@@ -47,25 +37,10 @@ FTLEN	.EQU	03H		;filetype length
 	.WORD	PTSTO-5
 FCB:	.WORD	DOCON,DEFFCB
 ;
-#IFNDEF WP2
-	.BYTE	84H		;REC# (returns address of random rec.#)
-	.TEXT	"REC"
-	.BYTE	'#'+$80
-	.WORD	FCB-6
-RECADR:	.WORD	DOCOL,FCB
-	.WORD	LIT,21H
-	.WORD	PLUS
-	.WORD	SEMIS
-#ENDIF
-;
 	.BYTE	83H		;USE
 	.TEXT	"US"
 	.BYTE	'E'+$80
-#IFDEF WP2
 	.WORD	FCB-6
-#ELSE
-	.WORD	RECADR-7
-#ENDIF
 USE:	.WORD	DOVAR,0		;/ initialised by CLD
 ;
 	.BYTE	84H		;PREV
@@ -198,194 +173,92 @@ BLOC3:	.WORD	DUP,AT
 BLOC1:	.WORD	FROMR,DROP
 	.WORD	TWOP,SEMIS
 ;
-#IFDEF WP2
+; 	Tandy WP-2 helper word to call one of the above four BIOS functions.
+;	Takes the values for the HL, DE, and A registers, as well as the address
+;	of the function to call. Leaves either 0 (success) or 1 (error) on the
+;	stack:
 ;
-OPEN	.EQU	0188h		;W open a file DE=fcb A=0=write|1=append|2=read -> CY=error
-READ	.EQU	018Bh		;W read a file DE=fcb HL=buffer(128) -> CY=error A=#read bytes
-WRITE	.EQU	018Eh		;W write a file DE=fcb HL=buffer -> CY=error
-CLOSE	.EQU	0191h		;W close a file HL=fcb -> CY=error
+;	( HL DE A ADDRESS -- f )
 ;
-; ( HL DE A address )
 	.BYTE	84H		;BIOS
 	.TEXT	"BIO"
 	.BYTE	'S'+$80
 	.WORD	BLOCK-8
 BIOS:	.WORD	$+2
-	POP	HL		;W pop address
-	LD	(BIOS1+1),HL	;W modify CALL 0
-	POP	DE		;W pop A
+	POP	HL		;pop address
+	LD	(BIOS1+1),HL	;modify CALL 0 below
+	POP	DE		;pop A
 	LD	A,E
-	POP	DE		;W pop DE
-	POP	HL		;W pop HL
+	POP	DE		;pop DE
+	POP	HL		;pop HL
 	PUSH	BC
-BIOS1:	CALL	0		;W self-modified
+BIOS1:	CALL	0		;self-modified address
 	POP	BC
-	LD	A,0		;W HL=0=ok, HL=1=error
+	LD	A,0		;carry flag was set on error
 	ADC	A,0
-	LD	L,A
+	LD	L,A		;push 0=success, 1=error
 	LD	H,0
 	JHPUSH
 ;
-; ( address blocknr f=0=write|1=read )
+;	Reads a block of data from a disc. For reasons mentioned above, each
+;	screen equals one block of 1,024 bytes, which is stored in its own
+;	file.
+;
 	.BYTE	83H		;R/W
 	.TEXT	"R/"
 	.BYTE	'W'+$80
 	.WORD	BIOS-7
 RSLW:	.WORD	DOCOL
 ;
-#IFDEF DEBUG
-;	0. print the arguments
-	.WORD	TOR,TOR,TOR
-	.WORD	FROMR,DUP,UDOT
-	.WORD	FROMR,DUP,UDOT
-	.WORD	FROMR,DUP,UDOT
-#ENDIF
-;
-;	1. set up the single fcb
-;		- device fixed (2=IC RAM) for now
-;		- filename is "scrnNNNN.fth" where NNNN is hex block number
-;		- length is 1,024 (16 * 64) bytes
-;
-;	SWAP		\ ( address f blocknr )
-;	FCB 5 +		\ ( address f blocknr addressNNNN )  point to NNNN
-;	SWAP 0		\ ( address f addressNNNN blocknr 0 )  make double length number
-;	BASE @ >R HEX	\ save base and switch to hex
-;	<# # # # #S #>	\ ( address f addressNNNN addressMMMM n )
-;	R> BASE !	\ restore base
-;	ROT SWAP	\ ( address f addressMMMM addressNNNN n )
-;	CMOVE		\ ( adddress f ) copy NNNN
+;	Update filename in FCB.
 ;
 	.WORD	SWAP
-	.WORD	FCB,LIT,5,PLUS
-	.WORD	SWAP,ZERO
-	.WORD	BASE,AT,TOR,HEX
-	.WORD	BDIGS,DIG,DIG,DIG,DIGS,EDIGS
-	.WORD	FROMR,BASE,STORE
+	.WORD	FCB,LIT,5,PLUS			;point to ???? in FCB
+	.WORD	SWAP,ZERO			;convert SCR # to double
+	.WORD	BASE,AT,TOR,HEX			;save BASE and go HEX
+	.WORD	BDIGS,DIG,DIG,DIG,DIGS,EDIGS	;convert SCR # to 4 hex digits
+	.WORD	FROMR,BASE,STORE		;restore BASE
 	.WORD	ROT,SWAP,CMOVE
 ;
-;	2. if top of stack = 1=read:
-;		- call OPEN with DE=fcb and A=2=read
-;		- check error
-;		- repeat 8 times:
-;			- call READ with DE=fcb and HL=addr
-;			- check error
-;			- addr += 128
+;	Read functionality.
 ;
-;	1 = IF					\ ( address )
-;		0 FCB 2 OPEN BIOS		\ ( n ) open for reading
-;		DUP DISK-ERROR !		\ store status
-;		8 ?ERROR			\ disk error?
-;		8 0 DO
-;			DUP FCB 0 READ BIOS	\ ( address n )  read
-;			DUP DISK-ERROR !	\ store status
-;			8 ?ERROR		\ disk error?
-;			80 +			\ ( address+128 )
-;		LOOP
-;
-	.WORD	ONE,EQUAL,ZBRAN
-	.WORD	RSLW2-$			;IF
-	.WORD	ZERO,FCB,TWO,LIT,OPEN,BIOS
-	.WORD	DUP,DSKERR,STORE
-	.WORD	LIT,8,QERR
-	.WORD	LIT,8,ZERO
+	.WORD	ONE,EQUAL,ZBRAN			;check if f=1 (read)
+	.WORD	RSLW2-$				;IF
+	.WORD	ZERO,FCB,TWO,LIT,OPEN,BIOS	;open screen file
+	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
+	.WORD	LIT,8,QERR			;error out if necessary
+	.WORD	LIT,8,ZERO			;read 8 sectors
 	.WORD	XDO
-RSLW1:	.WORD	DUP,FCB,ZERO,LIT,READ,BIOS
-	.WORD	DUP,DSKERR,STORE
-	.WORD	LIT,8,QERR
-	.WORD	LIT,128,PLUS
-	.WORD	XLOOP
+RSLW1:	.WORD	DUP,FCB,ZERO,LIT,READ,BIOS	;read a sector of 128 bytes
+	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
+	.WORD	LIT,8,QERR			;error out if necessary
+	.WORD	LIT,128,PLUS			;advance data buffer
+	.WORD	XLOOP				;next sector
 	.WORD	RSLW1-$
 	.WORD	BRAN
-	.WORD	RSLW4-$			;ELSE
+	.WORD	RSLW4-$				;ELSE
 ;
-;	3. if top of stack = 0=write:
-;		- call OPEN with DE=fcb and A=0=write
-;		- check error
-;		- repeat 8 times:
-;			- call WRITE with DE=fcb and HL=addr
-;			- check error
-;			- addr += 8
+;	Write functionality.
 ;
-;	ELSE
-;		0 FCB 0 OPEN BIOS		\ ( n ) open for writing
-;		DUP DISK-ERROR !		\ store status
-;		8 ?ERROR			\ disk error?
-;		8 0 DO
-;			DUP FCB 0 WRITE BIOS	\ ( address n )  write
-;			DUP DISK-ERROR !	\ store status
-;			8 ?ERROR		\ disk error?
-;			80 +			\ ( address+128 )
-;		LOOP
-;	THEN					\ ( address )
-;
-RSLW2:	.WORD	ZERO,FCB,ZERO,LIT,OPEN,BIOS
-	.WORD	DUP,DSKERR,STORE
-	.WORD	LIT,8,QERR
-	.WORD	LIT,8,ZERO
+RSLW2:	.WORD	ZERO,FCB,ZERO,LIT,OPEN,BIOS	;open screen file
+	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
+	.WORD	LIT,8,QERR			;error out if necessary
+	.WORD	LIT,8,ZERO			;write 8 sectors
 	.WORD	XDO
-RSLW3:	.WORD	DUP,FCB,ZERO,LIT,WRITE,BIOS
-	.WORD	DUP,DSKERR,STORE
-	.WORD	LIT,8,QERR
-	.WORD	LIT,128,PLUS
-	.WORD	XLOOP
+RSLW3:	.WORD	DUP,FCB,ZERO,LIT,WRITE,BIOS	;write a sector of 128 bytes
+	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
+	.WORD	LIT,8,QERR			;error out if necessary
+	.WORD	LIT,128,PLUS			;advance data buffer
+	.WORD	XLOOP				;next sector
 	.WORD	RSLW3-$
 ;
-;	4. call CLOSE with HL=fcb
-;	DROP			\ ( address -- )
-;	FCB 0 0 CLOSE BIOS	\ ( n ) close
-;	DUP DISK-ERROR !	\ store status
-;	8 ?ERROR		\ disk error?
+;	Close file.
 ;
-;	( address )
-RSLW4:	.WORD	DROP				; ( address -- )	ENDIF
-	.WORD	FCB,ZERO,ZERO,LIT,CLOSE,BIOS	; ( n )
-	.WORD	DUP,DSKERR,STORE		; ( n )
-	.WORD	LIT,8,QERR
+RSLW4:	.WORD	DROP				;ENDIF
+	.WORD	FCB,ZERO,ZERO,LIT,CLOSE,BIOS	;close screen file
+	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
+	.WORD	LIT,8,QERR			;error out if necessary
 	.WORD	SEMIS
-;
-#ELSE
-	.BYTE	84H		;BDOS  (CP/M function call)
-	.TEXT	"BDO"
-	.BYTE	'S'+$80
-	.WORD	BLOCK-8
-BDOS:	.WORD	$+2
-	EXX			;SAVE IP
-	POP	BC		;(C) <-- (S1)LB = CP/M function code
-	POP	DE		;(DE) <-- (S2)  = parameter
-	push	ix		;/
-	push	iy		;/
-	exx
-	push	bc		;/ save ip
-	exx
-	CALL	BDOSS		;return value in A
-	exx
-	pop	bc		;restore ip
-	exx
-	pop	iy		;/
-	pop	ix		;/
-	EXX			;restore IP
-	LD	L,A
-	LD	H,00H
-	JHPUSH			;(S1) <-- (HL) = returned value
-;
-	.BYTE	83H		;R/W
-	.TEXT	"R/"
-	.BYTE	'W'+$80
-	.WORD	BDOS-07H
-RSLW:	.WORD	DOCOL
-	.WORD	TOR		;store R/W flag
-	.WORD	RECADR,STORE
-	.WORD	ZERO,RECADR	;set record #
-	.WORD	TWOP,CSTOR
-	.WORD	LIT,SETDMA
-	.WORD	BDOS,DROP	;set DMA address
-	.WORD	LIT,WRTRND
-	.WORD	FROMR,SUBB	;select READ or WRITE
-	.WORD	FCB,SWAP
-	.WORD	BDOS		;do it
-	.WORD	DSKERR,STORE	;store return code
-	.WORD	SEMIS
-#ENDIF
 ;
 	.BYTE	85H		;FLUSH
 	.TEXT	"FLUS"
@@ -400,119 +273,10 @@ FLUS1:	.WORD	ZERO,BUFFE
 	.WORD	FLUS1-$
 	.WORD	SEMIS
 ;
-#IFNDEF WP2
-	.BYTE	86h			;/ EXTEND
-	.TEXT	"EXTEN"
-	.BYTE	'D'+$80
-	.WORD	FLUSH-08h
-EXTEND:
-	.WORD	DOCOL
-	.WORD	HERE			;/ fill with b/buf blanks
-	.WORD	BBUF
-	.WORD	BLANK
-	.WORD	LIT
-	.WORD	0008h
-	.WORD	STAR
-	.WORD	ZERO
-EXTND1:
-	.WORD	ONEP			; begin
-	.WORD	HERE			;/ was lit,f000h (Osborne video ram)
-	.WORD	OVER
-	.WORD	ONE
-	.WORD	RSLW
-	.WORD	DSKERR
-	.WORD	AT
-	.WORD	ZBRAN
-	.WORD	EXTND1-$		; until
-	.WORD	SWAP
-	.WORD	OVER
-	.WORD	PLUS
-	.WORD	SWAP
-	.WORD	XDO			; do
-EXTND2:
-	.WORD	HERE			;/ was lit,f000h (Osborne video ram)
-	.WORD	IDO
-	.WORD	ZERO
-	.WORD	RSLW
-	.WORD	XLOOP
-	.WORD	EXTND2-$		; loop
-	.WORD	FCB
-	.WORD	LIT
-	.WORD	CLSFIL
-	.WORD	BDOS			; close file
-	.WORD	DROP			; discard return code
-	.WORD	FOPEN
-	.WORD	DROP
-	.WORD	SEMIS
-;
-	.WORD	85H
-	.TEXT	"FOPE"			; FOPEN ( --- f )
-	.BYTE	'N'+$80			; Opens a file that currently exists in the
-	.WORD	EXTEND-9		; disk directory for the currently active
-FOPEN	.WORD	DOCOL			; user number. A true flag indicates failure.
-	.WORD	FCB
-	.WORD	LIT,OPNFIL		; open file
-	.WORD	BDOS
-	.WORD	LIT,0FFH		; check for error
-	.WORD	EQUAL
-	.WORD	DUP
-	.WORD	ZEQU
-	.WORD	WARN,STORE		; set WARNING variable
-	.WORD	SEMIS
-;
-	.BYTE	85H
-	.TEXT	"FTYP"			; FTYPE ( --- addr )
-	.BYTE	'E'+$80			; Returns address of file type used
-	.WORD	FOPEN-8			; with FILE.
-FTYPE	.WORD	DOCON,DEFFT
-DEFFT	.TEXT	"FTH"			; default file type
-;
-	.BYTE	84H			; FILE used in the form 
-	.TEXT	"FIL"			;     FILE cccc
-	.BYTE	'E'+$80			; Closes the current file and attempts
-	.WORD	FTYPE-08H		; to open the file with the given name.
-FILE:	.WORD	DOCOL			; The file type is determined by FTYPE.
-	.WORD	FCB
-	.WORD	LIT,CLSFIL		; close existing file
-	.WORD	BDOS
-	.WORD	DROP
-	.WORD	MTBUF			; clear buffer
-	.WORD	FCB			; clear FCB
-	.WORD	LIT,10H
-	.WORD	ZERO
-	.WORD	FILL			
-	.WORD	BL,WORD			; get filename
-	.WORD	HERE
-	.WORD	COUNT
-	.WORD	LIT,MAXLEN	
-	.WORD	MIN			; truncate filename if required
-	.WORD	FCB
-	.WORD	ONEP
-	.WORD	DUP
-	.WORD	LIT,MAXLEN
-	.WORD	BLANK			; blank filename in fcb
-	.WORD	FTYPE
-	.WORD	OVER
-	.WORD	LIT,MAXLEN
-	.WORD	PLUS
-	.WORD	LIT,FTLEN
-	.WORD	CMOVE			; set file type
-	.WORD	SWAP
-	.WORD	CMOVE
-	.WORD	FOPEN
-	.WORD	LIT,8
-	.WORD	QERR	
-	.WORD	SEMIS
-#ENDIF
-;
 	.BYTE	84H			;LOAD
 	.TEXT	"LOA"
 	.BYTE	'D'+$80
-#IFDEF WP2
 	.WORD	FLUSH-8
-#ELSE
-	.WORD	FILE-07H
-#ENDIF
 LOAD:	.WORD	DOCOL,BLK
 	.WORD	AT,TOR
 	.WORD	INN,AT
