@@ -20,7 +20,14 @@
 ;
 ;
 ;
+#IFDEF WP2
+DEFFCB:	.BYTE	011h		;W device (1=memory, 2=internal RAM disk, 3=IC RAM, 11h=drive A)
+	.TEXT	"SCRNXXXX.FTH"	;W filename, not zero-terminated
+	.WORD	16*64		;W one screen size
+	.BLOCK	17		;W reserved
+#ELSE
 DEFFCB	.EQU	005CH		;default FCB
+#ENDIF
 ;
 ;	CP/M FUNCTIONS
 ;
@@ -40,6 +47,7 @@ FTLEN	.EQU	03H		;filetype length
 	.WORD	PTSTO-5
 FCB:	.WORD	DOCON,DEFFCB
 ;
+#IFNDEF WP2
 	.BYTE	84H		;REC# (returns address of random rec.#)
 	.TEXT	"REC"
 	.BYTE	'#'+$80
@@ -48,11 +56,16 @@ RECADR:	.WORD	DOCOL,FCB
 	.WORD	LIT,21H
 	.WORD	PLUS
 	.WORD	SEMIS
+#ENDIF
 ;
 	.BYTE	83H		;USE
 	.TEXT	"US"
 	.BYTE	'E'+$80
+#IFDEF WP2
+	.WORD	FCB-6
+#ELSE
 	.WORD	RECADR-7
+#ENDIF
 USE:	.WORD	DOVAR,0		;/ initialised by CLD
 ;
 	.BYTE	84H		;PREV
@@ -185,6 +198,152 @@ BLOC3:	.WORD	DUP,AT
 BLOC1:	.WORD	FROMR,DROP
 	.WORD	TWOP,SEMIS
 ;
+#IFDEF WP2
+;
+OPEN	.EQU	0188h		;W open a file DE=fcb A=0=write|1=append|2=read -> CY=error
+READ	.EQU	018Bh		;W read a file DE=fcb HL=buffer(128) -> CY=error A=#read bytes
+WRITE	.EQU	018Eh		;W write a file DE=fcb HL=buffer -> CY=error
+CLOSE	.EQU	0191h		;W close a file HL=fcb -> CY=error
+;
+; ( HL DE A address )
+	.BYTE	84H		;BIOS
+	.TEXT	"BIO"
+	.BYTE	'S'+$80
+	.WORD	BLOCK-8
+BIOS:	.WORD	$+2
+	POP	HL		;W pop address
+	LD	(BIOS1+1),HL	;W modify CALL 0
+	POP	DE		;W pop A
+	LD	A,E
+	POP	DE		;W pop DE
+	POP	HL		;W pop HL
+	PUSH	BC
+BIOS1:	CALL	0		;W self-modified
+	POP	BC
+	LD	A,0		;W HL=0=ok, HL=1=error
+	ADC	A,0
+	LD	L,A
+	LD	H,0
+	JHPUSH
+;
+; ( address blocknr f=0=write|1=read )
+	.BYTE	83H		;R/W
+	.TEXT	"R/"
+	.BYTE	'W'+$80
+	.WORD	BIOS-7
+RSLW:	.WORD	DOCOL
+;
+#IFDEF DEBUG
+;	0. print the arguments
+	.WORD	TOR,TOR,TOR
+	.WORD	FROMR,DUP,UDOT
+	.WORD	FROMR,DUP,UDOT
+	.WORD	FROMR,DUP,UDOT
+#ENDIF
+;
+;	1. set up the single fcb
+;		- device fixed (2=IC RAM) for now
+;		- filename is "scrnNNNN.fth" where NNNN is hex block number
+;		- length is 1,024 (16 * 64) bytes
+;
+;	SWAP		\ ( address f blocknr )
+;	FCB 5 +		\ ( address f blocknr addressNNNN )  point to NNNN
+;	SWAP 0		\ ( address f addressNNNN blocknr 0 )  make double length number
+;	BASE @ >R HEX	\ save base and switch to hex
+;	<# # # # #S #>	\ ( address f addressNNNN addressMMMM n )
+;	R> BASE !	\ restore base
+;	ROT SWAP	\ ( address f addressMMMM addressNNNN n )
+;	CMOVE		\ ( adddress f ) copy NNNN
+;
+	.WORD	SWAP
+	.WORD	FCB,LIT,5,PLUS
+	.WORD	SWAP,ZERO
+	.WORD	BASE,AT,TOR,HEX
+	.WORD	BDIGS,DIG,DIG,DIG,DIGS,EDIGS
+	.WORD	FROMR,BASE,STORE
+	.WORD	ROT,SWAP,CMOVE
+;
+;	2. if top of stack = 1=read:
+;		- call OPEN with DE=fcb and A=2=read
+;		- check error
+;		- repeat 8 times:
+;			- call READ with DE=fcb and HL=addr
+;			- check error
+;			- addr += 128
+;
+;	1 = IF					\ ( address )
+;		0 FCB 2 OPEN BIOS		\ ( n ) open for reading
+;		DUP DISK-ERROR !		\ store status
+;		8 ?ERROR			\ disk error?
+;		8 0 DO
+;			DUP FCB 0 READ BIOS	\ ( address n )  read
+;			DUP DISK-ERROR !	\ store status
+;			8 ?ERROR		\ disk error?
+;			80 +			\ ( address+128 )
+;		LOOP
+;
+	.WORD	ONE,EQUAL,ZBRAN
+	.WORD	RSLW2-$			;IF
+	.WORD	ZERO,FCB,TWO,LIT,OPEN,BIOS
+	.WORD	DUP,DSKERR,STORE
+	.WORD	LIT,8,QERR
+	.WORD	LIT,8,ZERO
+	.WORD	XDO
+RSLW1:	.WORD	DUP,FCB,ZERO,LIT,READ,BIOS
+	.WORD	DUP,DSKERR,STORE
+	.WORD	LIT,8,QERR
+	.WORD	LIT,128,PLUS
+	.WORD	XLOOP
+	.WORD	RSLW1-$
+	.WORD	BRAN
+	.WORD	RSLW4-$			;ELSE
+;
+;	3. if top of stack = 0=write:
+;		- call OPEN with DE=fcb and A=0=write
+;		- check error
+;		- repeat 8 times:
+;			- call WRITE with DE=fcb and HL=addr
+;			- check error
+;			- addr += 8
+;
+;	ELSE
+;		0 FCB 0 OPEN BIOS		\ ( n ) open for writing
+;		DUP DISK-ERROR !		\ store status
+;		8 ?ERROR			\ disk error?
+;		8 0 DO
+;			DUP FCB 0 WRITE BIOS	\ ( address n )  write
+;			DUP DISK-ERROR !	\ store status
+;			8 ?ERROR		\ disk error?
+;			80 +			\ ( address+128 )
+;		LOOP
+;	THEN					\ ( address )
+;
+RSLW2:	.WORD	ZERO,FCB,ZERO,LIT,OPEN,BIOS
+	.WORD	DUP,DSKERR,STORE
+	.WORD	LIT,8,QERR
+	.WORD	LIT,8,ZERO
+	.WORD	XDO
+RSLW3:	.WORD	DUP,FCB,ZERO,LIT,WRITE,BIOS
+	.WORD	DUP,DSKERR,STORE
+	.WORD	LIT,8,QERR
+	.WORD	LIT,128,PLUS
+	.WORD	XLOOP
+	.WORD	RSLW3-$
+;
+;	4. call CLOSE with HL=fcb
+;	DROP			\ ( address -- )
+;	FCB 0 0 CLOSE BIOS	\ ( n ) close
+;	DUP DISK-ERROR !	\ store status
+;	8 ?ERROR		\ disk error?
+;
+;	( address )
+RSLW4:	.WORD	DROP				; ( address -- )	ENDIF
+	.WORD	FCB,ZERO,ZERO,LIT,CLOSE,BIOS	; ( n )
+	.WORD	DUP,DSKERR,STORE		; ( n )
+	.WORD	LIT,8,QERR
+	.WORD	SEMIS
+;
+#ELSE
 	.BYTE	84H		;BDOS  (CP/M function call)
 	.TEXT	"BDO"
 	.BYTE	'S'+$80
@@ -226,6 +385,7 @@ RSLW:	.WORD	DOCOL
 	.WORD	BDOS		;do it
 	.WORD	DSKERR,STORE	;store return code
 	.WORD	SEMIS
+#ENDIF
 ;
 	.BYTE	85H		;FLUSH
 	.TEXT	"FLUS"
@@ -240,6 +400,7 @@ FLUS1:	.WORD	ZERO,BUFFE
 	.WORD	FLUS1-$
 	.WORD	SEMIS
 ;
+#IFNDEF WP2
 	.BYTE	86h			;/ EXTEND
 	.TEXT	"EXTEN"
 	.BYTE	'D'+$80
@@ -342,11 +503,16 @@ FILE:	.WORD	DOCOL			; The file type is determined by FTYPE.
 	.WORD	LIT,8
 	.WORD	QERR	
 	.WORD	SEMIS
+#ENDIF
 ;
 	.BYTE	84H			;LOAD
 	.TEXT	"LOA"
 	.BYTE	'D'+$80
+#IFDEF WP2
+	.WORD	FLUSH-8
+#ELSE
 	.WORD	FILE-07H
+#ENDIF
 LOAD:	.WORD	DOCOL,BLK
 	.WORD	AT,TOR
 	.WORD	INN,AT

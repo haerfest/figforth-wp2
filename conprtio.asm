@@ -18,6 +18,122 @@ INPREQ	.EQU	0FFH		;DCONIO input request
 EPRINT:	.BYTE	0		;printer flag
 				;0=disabled, 1=enabled
 ;
+#IFDEF WP2
+;
+BEEP	.EQU	0121H		;W beep a buzzer
+CHARGET	.EQU	0103H		;W get one character (wait for input)
+CHKCNCL	.EQU	0124H		;W check that CNCL key is pressed now
+CLS	.EQU	011EH		;W clear screen
+CURSON	.EQU	010FH		;W set cursor on/off
+GETLOC	.EQU	010CH		;W get cursor location
+KILLBUF	.EQU	0106H		;W kill key buffer
+PUTCHAR	.EQU	01A3H		;W output character to console (support esc. seq.)
+SETLOC	.EQU	0109H		;W set cursor location
+;
+CONSTAT	.EQU	8403H		;W console status bits
+CURSORX	.EQU	8358H		;W cursor X position
+VRAM	.EQU	9900H		;W beginning of 3,840 bytes of VRAM
+;
+;
+PEMIT:	.WORD	$+2		;(EMIT) orphan
+	POP	DE		;(E)<--(S1)LB = CHR
+	LD	A,E
+	CP	ACR		;W carriage return?
+	JR	Z,PCR
+	CP	BSIN		;W backspace?
+	JR	Z,BCKSP
+	CP	FF		;W clear screen?
+	JR	NZ,PEMIT1
+;
+	PUSH	BC
+	CALL	CLS
+	POP	BC
+	JR	PEMITE
+;
+PEMIT1:	CP	BELL		;W bell?
+	JR	NZ,PEMIT2
+;
+	LD	A,0		;W 0=low/1=high beep
+	CALL	BEEP
+	JR	PEMITE
+;
+PEMIT2:	PUSH	BC
+	CALL	PUTCHAR
+	POP	BC
+PEMITE:	JNEXT
+;
+BCKSP:	PUSH	BC
+	CALL	GETLOC		;W where is the cursor?
+	LD	A,H		;W at X=0?
+	OR	A
+	JR	Z,BCKSPE	;W yes, nothing to do
+	DEC	H		;W cursor left one position
+	CALL	SETLOC
+	PUSH	HL
+	LD	A,ABL		;W space over old character
+	CALL	PUTCHAR
+	POP	HL
+	CALL	SETLOC		;W back again
+BCKSPE:	POP	BC
+	JNEXT
+;
+PKEY:	PUSH	BC
+	LD	HL,CONSTAT	;W check if cursor enabled
+	BIT	2,(HL)
+	JR	Z,PKEY1		;W yes
+	XOR	A		;W enable cursor
+	CALL	CURSON
+PKEY1:	CALL	CHARGET
+	LD	L,H
+	LD	H,0
+	POP	BC
+	JHPUSH
+;
+PQTER:	LD	HL,0		;W assume CNCL not pressed
+	CALL	CHKCNCL		;W CNCL pressed now?
+	JR	NC,PQTERE	;W no, end
+PQTER1:	CALL	CHKCNCL		;W wait until CNCL released
+	JR	C,PQTER1
+	CALL	KILLBUF		;W clear keyboard buffer
+	LD	HL,1		;W signal CNCL was pressed
+PQTERE:	JHPUSH
+;
+; "Execute a terminal carriage return and line feed."
+;
+; Note that PUTCHAR only scrolls the display when printing normal characters
+; sequentially. Printing CR or LF only change the cursor position, without
+; checking whether the display should be scrolled as a consequence :(
+;
+; Also note that there is a bug in the BIOS where sending ESC 'K', which should
+; erase to the end of the line, only erases (80 - Y) characters, rather than
+; (80 - X) as intended, so we cannot use that
+;
+PCR:	PUSH	BC
+	LD	A,0DH		;W print CR
+	CALL	PUTCHAR
+	LD	A,0AH		;W print LF
+	CALL	PUTCHAR
+	CALL	GETLOC		;W where is the cursor
+	LD	A,L		;W check y-position
+	CP	8		;W less than 8?
+	JR	C,PCRE		;W yes, end
+	LD	BC,7*480	;W copy 7 lines
+	LD	HL,VRAM+480	;W from lines 1-7
+	LD	DE,VRAM		;W to lines 0-6
+	LDIR
+	LD	BC,480-1	;W erase last line
+	LD	HL,VRAM+(7*480)
+	LD	DE,VRAM+(7*480)+1
+	XOR	A
+	LD	(HL),A
+	LDIR
+	LD	HL,7		;W cursor at beginning of line 7
+	CALL	SETLOC
+PCRE:	POP	BC
+	JNEXT
+;
+#ELSE
+;
 SYSENT:	PUSH	BC
 	PUSH	DE
 	PUSH	HL
@@ -120,3 +236,4 @@ PCR:	LD	E,ACR
 ;
 ;
 ;
+#ENDIF

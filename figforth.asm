@@ -80,9 +80,15 @@ FF	.EQU	0CH		;^L
 ;
 ;	Memory allocation
 ;
+#IFNDEF WP2
 BDOSS	.EQU	0005H		;/ system entry
+#ENDIF
 NSCR	.EQU	4		;  # of 1024 byte screens
+#IFDEF WP2
+KBBUF	.EQU	1024		;  bytes/disc buffer
+#ELSE
 KBBUF	.EQU	128		;  bytes/disc buffer
+#ENDIF
 US	.EQU	40H		;  user variables space
 RTS	.EQU	400H		;  Return Stack & term buff space
 CO	.EQU	KBBUF+4		;  Disc buff + 2 header + 2 tail
@@ -91,7 +97,16 @@ BUFSIZ	.EQU	CO*NBUF		;/ total disc buffer size
 	.EJECT
 	;ABS
 ;
+#IFDEF WP2
+
+	.ORG	0AC00H-8
+	.TEXT	"PR"		;W ID
+	.WORD	(((PRGEND-ORIG+1)/32)+1)*32	;W SIZE OF PROGRAM IN MULTIPLES OF 32 BYTES (WORKAROUND A BUG)
+	.WORD	ORIG		;W ADDRESS OF ENTRY
+	.WORD	0		;W LOCATED ADDRESS (HERE IS 0)
+#ELSE
 	.ORG	0100H
+#ENDIF
 ORIG:	NOP
 	JP	CLD		;VECTOR TO COLD START
 	NOP
@@ -131,8 +146,13 @@ R0INIT:	.WORD	0		;/ INIT (R0)
 TIBINI:	.WORD	0		;/ INIT (TIB)
 	.WORD	1FH		;  INIT (WIDTH)
 	.WORD	0		;  INIT (WARNING)
+#IFDEF WP2
+FNINIT:	.WORD	0		;W INIT (FENCE)
+DPINIT:	.WORD	0		;W INIT (DP)
+#ELSE
 	.WORD	INITDP		;  INIT (FENCE)
 	.WORD	INITDP		;  INIT (DP)
+#ENDIF
 	.WORD	FORTH+8		;  INIT (VOC-LINK)
 ;
 ; *  END DATA USED BY COLD *
@@ -143,6 +163,11 @@ TIBINI:	.WORD	0		;/ INIT (TIB)
 	.WORD	0		;VIDEO DEVICE ID
 	.WORD	0,0,0		;RTC DATE/TIME
 #ENDIF
+
+#IFDEF WP2
+WP2SP:	.WORD	0		;W original WP2 stack pointer
+#ENDIF
+
 	.EJECT
 ;	REGISTERS
 ;
@@ -2757,12 +2782,24 @@ ABORT:	.WORD	DOCOL
 	.WORD	SPSTO
 	.WORD	DEC
 	.WORD	QSTAC
+#IFDEF WP2
+	.WORD	LIT,FF		;W clear screen
+	.WORD	PEMIT
+#ELSE
 	.WORD	CR
+#ENDIF
 	.WORD	DOTCPU
 	.WORD	PDOTQ
 	.BYTE	0EH		;count of CHRs to follow
 	.TEXT	"fig-FORTH "
 	.BYTE	FIGREL+30H,ADOT,FIGREV+30H,USRVER
+#IFDEF WP2
+	.WORD	CR
+	.WORD	LIMIT,HERE,SUBB,DOT
+	.WORD	PDOTQ
+	.BYTE	0AH
+	.TEXT	"bytes free"
+#ENDIF
 	.WORD	FORTH
 	.WORD	DEFIN
 	.WORD	QUIT
@@ -2779,8 +2816,29 @@ WARM:	.WORD	DOCOL
 	.WORD	MTBUF
 	.WORD	ABORT
 ;
+#IFDEF WP2
+
+MALLOC	.EQU	0170h
+MFREE	.EQU	0176h
+
+CLD:	LD	(WP2SP),SP	;W save original stack pointer for BYE
+	LD	HL,0		;W claim all available memory
+	CALL	MALLOC		;W -> HL=address DE=#32-byte blocks
+	JR	C,BYEE		;W error
+	LD	(FNINIT),HL	;W fence value, cannot forget below allocated memory
+	LD	(DPINIT),HL	;W our dictionary extends inside allocated memory
+	EX	DE,HL		;W convert #32-byte blocks to #bytes
+	ADD	HL,HL
+	ADD	HL,HL
+	ADD	HL,HL
+	ADD	HL,HL
+	ADD	HL,HL
+	EX	DE,HL
+	ADD	HL,DE		;W calculate end of our memory
+#ELSE
 CLD:	LD	HL,(BDOSS+1)	;/
 	LD	L,0		;/ (HL)<--FBASE
+#ENDIF
 	LD	(LIMIT+2),HL	;/ set LIMIT
 	LD	DE,BUFSIZ	;/ (DE)<--total disc buffer size
 	OR	A		;/ clr carry
@@ -2813,8 +2871,10 @@ CLD1:	.WORD	COLD
 	.WORD	WARM-7
 COLD:	.WORD	DOCOL
 	.WORD	MTBUF
+#IFNDEF WP2
 	.WORD	ONE,RECADR	;AvdH
 	.WORD	STORE
+#ENDIF
 	.WORD	LIT,BUF1
 	.WORD	AT		;/
 	.WORD	USE,STORE
@@ -2843,6 +2903,7 @@ COLD:	.WORD	DOCOL
 	.WORD	LIT
 	.WORD	FORTH+6
 	.WORD	STORE
+#IFNDEF WP2
 	.WORD	FOPEN
 	.WORD	FCB
 	.WORD	ONEP
@@ -2856,6 +2917,7 @@ COLD:	.WORD	DOCOL
 	.BYTE	7
 	.TEXT	"No File"
 	.WORD	BYE
+#ENDIF
 CLD2:	.WORD	ABORT
 ;
 	.BYTE	84H		;S->D
@@ -3784,6 +3846,13 @@ VLIS2:	.WORD	DUP
 	.TEXT	"BY"
 	.BYTE	'E'+$80
 	.WORD	VLIST-8
+#IFDEF WP2
+BYE:	.WORD	$+2
+	CALL	MFREE		;W release memory back to system
+BYEE:	XOR	A		;W program area can be returned to system
+	LD	SP,(WP2SP)	;W restore system stack pointer
+	RET			;W return to system
+#ELSE
 BYE:	.WORD	DOCOL		;/A
 	.WORD	FLUSH		;/A
 	.WORD	FCB,LIT		;/E
@@ -3791,6 +3860,7 @@ BYE:	.WORD	DOCOL		;/A
 	.WORD	DROP		;/E discard directory code
 	.WORD	ZERO,ZERO	;/A
 	.WORD	BDOS		;/A return to CP/M
+#ENDIF
 	.WORD	SEMIS		;/A won't get this far, just for pretty
 ;
 	.BYTE	84H	; PAGE		1.3
@@ -3910,7 +3980,11 @@ DOTCPU:	.WORD	DOCOL
 	.WORD	DOTCPU-7
 TASK:	.WORD	DOCOL
 	.WORD	SEMIS
+
+#IFNDEF WP2
 ;
 INITDP:	.FILL	95,0
 ;
-	.END
+#ENDIF
+;
+PRGEND:	.END
