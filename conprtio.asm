@@ -15,6 +15,7 @@ CHARGET	.EQU	0103H		;get one character (wait for input)
 CHKCNCL	.EQU	0124H		;check that CNCL key is pressed now
 CLS	.EQU	011EH		;clear screen
 CURSON	.EQU	010FH		;set cursor on/off
+CURSTYP	.EQU	0112H		;set cursor type
 GETLOC	.EQU	010CH		;get cursor location
 KILLBUF	.EQU	0106H		;kill key buffer
 PUTCHAR	.EQU	01A3H		;output character to console (support esc. seq.)
@@ -24,6 +25,14 @@ SETLOC	.EQU	0109H		;set cursor location
 ;
 CONSTAT	.EQU	8403H		;console status bits
 VRAM	.EQU	9900H		;beginning of 3,840 bytes of VRAM
+;
+;	Console initialization.
+;
+CONINI:	LD	A,0		;select line cursor
+	CALL	CURSTYP
+	XOR	A		;switch cursor on
+	CALL	CURSON
+	JP	CLS		;clear screen
 ;
 ;	Emit a character
 ;
@@ -70,11 +79,6 @@ BCKSPE:	POP	BC
 ;	Read a key from the keyboard
 ;
 PKEY:	PUSH	BC
-	LD	HL,CONSTAT	;check if cursor enabled
-	BIT	2,(HL)
-	JR	Z,PKEY1		;yes
-	XOR	A		;no, enable cursor
-	CALL	CURSON
 PKEY1:	CALL	CHARGET		;wait for a key
 	LD	L,H		;return key code
 	LD	H,0
