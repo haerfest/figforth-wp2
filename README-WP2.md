@@ -182,10 +182,14 @@ Status | Meaning
 `S`    | Stop. End of the list. Next block always zero.
 `F`    | Free. This block is available to be malloc'ed.
 `u`    | Used. This block can be free'd.
-`U`    | ?
-`P`    | ?
+`U`    | Unusable? Empty block (0 bytes)?
+`P`    | Protected? First block only can be `P`?
 
-The _gaps_ between subsequent nodes constitute the space allocated to that node:
+The space that is assigned to a node follows the node immediately, as a number of
+32-byte blocks. That space in turn is followed by the next node in the list, and
+so on, until an `S` node is encountered.
+
+For example:
 
           80h    81h    82h    83h    84h    85h    86h    87h    88h    89h     block number
        +------+------+------+------+------+------+------+------+------+------+
@@ -195,33 +199,34 @@ The _gaps_ between subsequent nodes constitute the space allocated to that node:
 
 In the example above, if the first node resides at memory address 9000h or block
 80h, and it represents 96 bytes of memory, then it will be followed by a gap of
-96 bytes, and the next node is found at memory address 9080h.
+96 bytes (3 blocks of 32 bytes). The next node is then found at memory address
+9080h or block 84h.
 
-The first node will have block 84h as the next node's block number in its second
-field, and the second node will have block 80h as the previous node's block number
-in its first field, and so on:
+The first node will have block 84h as the next node's block number in its administration,
+and the second node will have block 80h as the previous node's block number in its
+administration, and so on:
 
           Next   Previous
     +---+---+---+---+---+---+---+--/--+---+---+
-    |St.|  84h  |  00h  |       Unused        |   node at 80h
+    |St.|  84h  |  00h  |       Unused        |   node  at 80h
     +---+---+---+---+---+---+---+--/--+---+---+
-    |                                         |
+    |                                         |   space at 81h
     +                                         +
-    |                96 bytes                 |
+    |                96 bytes                 |   space at 82h
     +                                         +
-    |                                         |
+    |                                         |   space at 83h
     +---+---+---+---+---+---+---+--/--+---+---+
-    |St.|  86h  |  80h  |                     |   node at 84h
+    |St.|  86h  |  80h  |                     |   node  at 84h
     +---+---+---+---+---+---+---+--/--+---+---+
-    |                32 bytes                 |
+    |                32 bytes                 |   space at 85h
     +---+---+---+---+---+---+---+--/--+---+---+
-    |St.|  89h  |  84h  |                     |   node at 86h
+    |St.|  89h  |  84h  |                     |   node  at 86h
     +---+---+---+---+---+---+---+--/--+---+---+
-    |                                         |
+    |                                         |   space at 87h
     +                64 bytes                 +
-    |                                         |
+    |                                         |   space at 88h
     +---+---+---+---+---+---+---+--/--+---+---+
-    | S |  00h  |  86h  |                     |   node at 89h
+    | S |  00h  |  86h  |                     |   node  at 89h
     +---+---+---+---+---+---+---+--/--+---+---+
 
 Assuming the node at 80h is the very first node, it will have zero as the
@@ -280,11 +285,11 @@ deduce what fig-FORTH can use, for example:
 
     +-----------+ FFFFh
     | RAM disk? |
-    +-----------+
+    +-----------+ LIMIT
     | allocated |
     |    to     |
     | fig-FORTH |
-    +-----------+
+    +-----------+ DP
     | head node |
     +-----------+
     |           |
@@ -312,6 +317,12 @@ My Tandy WP-2 reports the following ROM versions:
     Copyright 1989 CITIZEN WATCH CO.,LTD.
     Copyright 1989 Something Good Inc. V1.54
     Copyright 1989 Microlytics,UFO,Xerox V4.7
+
+Online I have also seen photos of WP-2 with the second line reading:
+
+    Copyright 1989 Something Good Inc. V1.62
+
+It would be interesting to verify whether the bugs listed below are fixed in that version.
 
 ## Bugs
 
@@ -354,7 +365,7 @@ While porting I encountered two bugs in the BIOS:
    addresses at 8357h (Y position) and 8358h (X position). These are usually
    loaded by a single instruction into register HL.
    
-   The Z80 being a little-endian processor, this means the low byte (L) is
+   As the Z80 is a little-endian processor, this means the low byte (L) is
    loaded from the lower address (8357h) and thus will contain the Y position,
    wherease the high byte (H) is loaded from the higher address (8358h) and
    will contain the X position.
@@ -363,7 +374,7 @@ While porting I encountered two bugs in the BIOS:
    does when implemeting this escape code. It wants to retrieve the cursor's
    X position and subtract it from 80 (the number of columns of the display) to
    get the number of columns it should clear. E.g., if the cursor is at X = 10,
-   then it has 80 - 1 = 70 columns left to clear.
+   then it has 80 - 10 = 70 columns left to clear.
 
    Except the code starting at 2356h subtracts the Y coordinate from 80:
 
