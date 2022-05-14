@@ -242,6 +242,26 @@ Memory address 88DDh contains the block number of the head of the list. After
 an application (such as fig-FORTH) has run, the BIOS sets the head to block
 160h, which is RAM address AC00h or the application load address.
 
+Once fig-FORTH has loaded, you can examine the actual memory administration
+interactively:
+
+    HEX ok
+    88DD ? 240 ok                       ( head node at block 240h )
+    240 20 * 8000 + U. C800 ok          ( or address C800h )
+    C800 C@ EMIT SPACE u ok             ( block is marked used )
+    C801 ? 3F8 ok                       ( next node at block 3F8h )
+    3F8 20 * 8000 + U. FF00 ok          ( or address FF00h )
+
+    FF00 C@ EMIT SPACE U ok             ( block is marked U (?) )
+    FF01 ? 3F9 ok                       ( next node at block 3F9h )
+    3F9 20 * 8000 + U. FF20 ok          ( or address FF20 )
+
+    FF20 C@ EMIT SPACE U ok             ( block is marked U (?) )
+    FF21 ? 3FF ok                       ( final node at block 3FFh )
+    3FF 20 * 8000 + U. FFE0 ok          ( or address FFE0 )
+
+    FFE0 C@ EMIT SPACE S ok             ( stop, end of list )
+
 ### Impact on fig-FORTH
 
 Understanding the memory allocation was important because I wanted fig-FORTH
@@ -289,7 +309,7 @@ deduce what fig-FORTH can use, for example:
     | allocated |
     |    to     |
     | fig-FORTH |
-    +-----------+ DP
+    +-----------+ FENCE = DP
     | head node |
     +-----------+
     |           |
@@ -307,8 +327,28 @@ boundaries:
 User variable | Need to set because...
 --------------|-----------------------
 `LIMIT`       | Don't want to cross upper boundary of allocated RAM.
-`DP`          | User dictionary starts at beginning of allocated RAM, beyond head node.
-`FENCE`       | Cannot forget below initial `DP`, although may not be necessary?
+`FENCE`       | Cannot forget below allocated RAM.
+`DP`          | User dictionary starts at beginning of allocated RAM.
+
+At a cold start, the `TASK` word is the last word added to the dictionary. All
+user-defined words follow it. Its purpose is that the user can `FORGET` it and
+thereby easily discard all her self-defined words.
+
+For that to work, I had to place `TASK` inside the allocated memory, or `FENCE`
+would prevent the user from forgetting it, making it completely useless. That
+is why `COLD` _dynamically_ creates `TASK` as one of its last acts.
+
+You can see the effect from fig-FORTH -- in this example, the assembled
+fig-FORTH binary occupied up to address C7F8h:
+
+    HEX ok
+    LIMIT U. FF00 ok             ( FF00h and above is off-limits to us )
+    FENCE @ U. C820 ok           ( we cannot FORGET below C820h )
+    ' TASK NFA @ U. C820 ok      ( the first dynamically created word is there )
+    ' .CPU NFA @ U. C7D3 ok      ( the last statically created word is at C7D3 )
+
+    88DD ? 240 ok                ( head malloc node is at block 240h )
+    240 20 * 8000 + U. C800 ok   ( right in between .CPU and TASK )
 
 ## ROM Version
 
