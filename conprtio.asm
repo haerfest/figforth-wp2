@@ -12,13 +12,13 @@
 ;
 BEEP	.EQU	0121H		;beep a buzzer
 CHARGET	.EQU	0103H		;get one character (wait for input)
+CHAROUT	.EQU	0118H		;output character to console
 CHKCNCL	.EQU	0124H		;check that CNCL key is pressed now
 CLS	.EQU	011EH		;clear screen
 CURSON	.EQU	010FH		;set cursor on/off
 CURSTYP	.EQU	0112H		;set cursor type
 GETLOC	.EQU	010CH		;get cursor location
 KILLBUF	.EQU	0106H		;kill key buffer
-PUTCHAR	.EQU	01A3H		;output character to console (support esc. seq.)
 SETLOC	.EQU	0109H		;set cursor location
 ;
 ;	Memory locations accessed by the Tandy WP-2 console interface
@@ -40,41 +40,112 @@ PEMIT:	.WORD	$+2		;(EMIT) orphan
 	POP	DE		;(E)<--(S1)LB = CHR
 	LD	A,E		;what are we printing?
 	CP	ACR		;carriage return?
-	JR	Z,PCR		;yes
+	JR	Z,PCR
+	CP	LF		;line feed?
+	JR	Z,PLF
+	CP	FF		;form feed?
+	JR	Z,PFF
 	CP	BSIN		;backspace?
-	JR	Z,BCKSP		;yes
-	CP	FF		;clear screen?
-	JR	NZ,PEMIT1	;no
-	PUSH	BC		;clear the screen
-	CALL	CLS
-	POP	BC
-	JR	PEMITE		;done
-PEMIT1:	CP	BELL		;bell?
-	JR	NZ,PEMIT2	;no
-	LD	A,0		;sound a low (0) bell (1=high)
-	CALL	BEEP
-	JR	PEMITE		;done
-PEMIT2:	PUSH	BC		;emit a 'regular' character
-	CALL	PUTCHAR
-	POP	BC
+	JR	Z,PBS
+	CP	BELL		;bell?
+	JR	Z,PBELL
+	CALL	GETLOC		;remember cursor in HL
+	CALL	CHAROUT		;emit character
+	LD	A,H		;was X<79?
+	CP	79
+	JR	C,PEMITE
+	LD	A,L		;was Y<7?
+	CP	7
+	JR	C,PEMITE
+	CALL	SCROLL
 PEMITE:	JNEXT
 ;
-;	Deal with the backspace
+;	Performs a carriage return and a line feed.
 ;
-BCKSP:	PUSH	BC
-	CALL	GETLOC		;where is the cursor?
-	LD	A,H		;at X=0?
-	OR	A
-	JR	Z,BCKSPE	;yes, nothing to do
-	DEC	H		;cursor left one position
+PCR:	CALL	GETLOC		;set cursor X=0
+	LD	H,0
 	CALL	SETLOC
-	PUSH	HL
-	LD	A,ABL		;emit space over old character
-	CALL	PUTCHAR
-	POP	HL
-	CALL	SETLOC		;cursor left one position
-BCKSPE:	POP	BC
+;
+;	Performs a line feed.
+;
+PLF:	CALL	GETLOC		;set cursor Y=Y+1
+	INC	L
+	LD	A,L
+	CP	8
+	JR	C,PLF1		;Y < 8
+	CALL	SCROLL
+	DEC	L
+PLF1:	CALL	SETLOC
 	JNEXT
+;
+;	Performs a form feed.
+;
+PFF:	PUSH	BC
+	CALL	CLS
+	POP	BC
+	JNEXT
+;
+;	Performs a backspace.
+;
+PBS:	CALL	GETLOC		;get cursor position
+	LD	D,H
+	LD	E,L
+	CALL	PBSB		;can we go backwards?
+	RST	20h
+	JR	Z,PBSE		;no
+;
+;	We can perform a backspace.
+;
+	CALL	SETLOC		;go back
+	LD	A,ABL		;erase
+	CALL	CHAROUT
+	CALL	SETLOC		;go back once more
+PBSE:	JNEXT
+;
+;	Given a cursor position in HL, return the previous cursor position in
+;	HL if backspace were executed.
+;
+PBSB:	DEC	H
+	LD	A,H
+	CP	80h		;negative?
+	RET	C
+;
+;	X<0
+;
+	LD	H,79		;set cursor X=79
+	DEC	L		;set cursor Y=Y-1
+	LD	A,L
+	CP	80h		;negative?
+	RET	C
+;
+;	Y<0 and X=79 
+;
+	LD	HL,0		;set cursor X=0 and Y=0
+	RET
+;
+;	Rings the bell.
+;
+PBELL:	XOR	A		;0=low beep, 1=high beep
+	CALL	BEEP
+	JNEXT
+;
+;	Scrolls the display up one line of characters.
+;
+SCROLL:	PUSH	BC
+	PUSH	HL
+	LD	BC,7*480	;copy 7 lines
+	LD	HL,VRAM+480	;from lines 1-7
+	LD	DE,VRAM		;to lines 0-6
+	LDIR
+	LD	BC,480-1	;erase last line
+	LD	HL,VRAM+(7*480)
+	LD	DE,VRAM+(7*480)+1
+	XOR	A
+	LD	(HL),A
+	LDIR
+	POP	HL
+	POP	BC
+	RET
 ;
 ;	Read a key from the keyboard
 ;
@@ -95,39 +166,3 @@ PQTER1:	CALL	CHKCNCL		;yes, wait until released
 	CALL	KILLBUF		;clear keyboard buffer
 	LD	HL,1		;signal it was pressed
 PQTERE:	JHPUSH
-;
-;	Execute a terminal carriage return and line feed.
-;
-;	Note that PUTCHAR only scrolls the display when printing normal
-;	characters sequentially. Printing CR or LF only change the cursor
-;	position, without checking whether the display should be scrolled as
-;	a consequence :(
-;
-;	Also note that there is a bug in the BIOS where sending ESC 'K', which
-;	should erase to the end of the line, only erases (80 - Y) characters,
-;	rather than (80 - X) as intended, so we cannot use that
-;
-PCR:	PUSH	BC
-	LD	A,0DH		;print CR
-	CALL	PUTCHAR
-	LD	A,0AH		;print LF
-	CALL	PUTCHAR
-	CALL	GETLOC		;where is the cursor
-	LD	A,L		;check y-position
-	CP	8		;less than 8?
-	JR	C,PCRE		;yes, done
-	LD	BC,7*480	;copy 7 lines
-	LD	HL,VRAM+480	;from lines 1-7
-	LD	DE,VRAM		;to lines 0-6
-	LDIR
-	LD	BC,480-1	;erase last line
-	LD	HL,VRAM+(7*480)
-	LD	DE,VRAM+(7*480)+1
-	XOR	A
-	LD	(HL),A
-	LDIR
-	LD	HL,7		;cursor to beginning of line 7
-	CALL	SETLOC
-PCRE:	POP	BC
-	JNEXT
-;
