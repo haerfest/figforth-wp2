@@ -19,9 +19,12 @@ Then:
 3. Use the arrow keys left/right to highlight `DISKETTE` and press `Enter`.
 4. Use the arrow keys up/down to highlight `figforth.ex` and press `F2` + `7` (RUN).
 
-After a few seconds of transferring the binary over, the Forth prompt should appear:
+After a few seconds of transferring the binary over, the Forth prompt should appear and you can
+program way on your WP-2:
 
 ![Forth Prompt](img/forth-wp2.jpg)
+
+(Yes, that is a Forth version of the [BASIC Benchmark](https://docs.google.com/spreadsheets/d/1bfWSR2Ngy1RPedS6j-M607eeAhsd40-nhAfswILzzS8/edit?usp=sharing) of [Noel's Retro Lab](https://www.youtube.com/c/NoelsRetroLab/).)
 
 ## Tips
 
