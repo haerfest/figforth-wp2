@@ -40,7 +40,7 @@ PEMIT:	.WORD	$+2		;(EMIT) orphan
 	POP	DE		;(E)<--(S1)LB = CHR
 	LD	A,E		;what are we printing?
 	CP	ACR		;carriage return?
-	JR	Z,PCR
+	JR	Z,PCR0
 	CP	LF		;line feed?
 	JR	Z,PLF
 	CP	FF		;form feed?
@@ -60,9 +60,16 @@ PEMIT:	.WORD	$+2		;(EMIT) orphan
 	CALL	SCROLL
 PEMITE:	JNEXT
 ;
+;	Performs a carriage return.
+;
+PCR0:	CALL	GETLOC		;set cursor X=0
+	LD	H,0
+	CALL	SETLOC
+	JNEXT
+;
 ;	Performs a carriage return and a line feed.
 ;
-PCR:	CALL	GETLOC		;set cursor X=0
+PCR:	CALL	GETLOC
 	LD	H,0
 	CALL	SETLOC
 ;
@@ -72,10 +79,10 @@ PLF:	CALL	GETLOC		;set cursor Y=Y+1
 	INC	L
 	LD	A,L
 	CP	8
-	JR	C,PLF1		;Y < 8
+	JR	C,PLFE		;Y < 8
 	CALL	SCROLL
 	DEC	L
-PLF1:	CALL	SETLOC
+PLFE:	CALL	SETLOC
 	JNEXT
 ;
 ;	Performs a form feed.
