@@ -159,10 +159,6 @@ DPINIT:	.WORD	0		;W INIT (DP)
 ;
 	.WORD	0H,0B250H	;Z80 CPU NAME (HW,LW)
 				;(32 BIT BASE 36 INTEGER)
-#IFDEF ROMWBW
-	.WORD	0		;VIDEO DEVICE ID
-	.WORD	0,0,0		;RTC DATE/TIME
-#ENDIF
 
 WP2SP:	.WORD	0		;original Tandy WP-2 stack pointer
 
@@ -2880,6 +2876,7 @@ COLD:	.WORD	DOCOL
 ;	Define no-op TASK within the dynamically allocated memory, so the user
 ;	can safely FORGET it if desired.
 ;
+	.WORD	FORTH,DEFIN	;make FORTH current and context vocabulary
 	.WORD	LIT,TASK	;place "TASK" + zero byte
 	.WORD	TIB,AT		;in text input buffer (TIB)
 	.WORD	LIT,5,CMOVE	;so CREATE can find it
@@ -3313,17 +3310,10 @@ PTSTO:	.WORD	$+2
 	.EJECT
 #INCLUDE "CONPRTIO.ASM"
 	.EJECT
-#IFDEF ROMWBW 
-#INCLUDE "ROMWBW.ASM"
-PREVNFA	.EQU	BCD-5
-#ELSE
-PREVNFA	.EQU	ARROW-6
-#ENDIF
-	.EJECT
 ;
 	.BYTE	0C1H		; ' (tick)
 	.BYTE	0A7H
-	.WORD	PREVNFA
+	.WORD	ARROW-6
 TICK:	.WORD	DOCOL
 	.WORD	DFIND
 	.WORD	ZEQU
