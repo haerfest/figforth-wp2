@@ -92,10 +92,11 @@ BUFSIZ	.EQU	CO*NBUF		;/ total disc buffer size
 	.EJECT
 	;ABS
 ;
-;	Tandy WP-2 BIOS functions used by the main body
+;	Tandy WP-2 BIOS functions and variables used by the main body
 ;
 MALLOC	.EQU	0170h		;allocate memory
 MFREE	.EQU	0176h		;free allocated memory
+MHDBLK	.EQU	088DDh		;head of malloc list block #
 ;
 ;	Header to make this a RUN FILE for the Tandy WP-2. A RUN FILE can be
 ;	loaded from the built-in FILES application by pressing F2 + 7 (RUN).
@@ -140,7 +141,7 @@ ORIG:	NOP
 ;
 ;
 ;
-	.WORD	DOTCPU-7	;  TOPMOST WORD IN FORTH VOCABULARY
+	.WORD	TASK-7		;  TOPMOST WORD IN FORTH VOCABULARY
 	.WORD	BSIN		;  BACKSPACE CHR
 UPINIT:	.WORD	0		;/ INIT (UP)
 ;
@@ -151,17 +152,19 @@ R0INIT:	.WORD	0		;/ INIT (R0)
 TIBINI:	.WORD	0		;/ INIT (TIB)
 	.WORD	1FH		;  INIT (WIDTH)
 	.WORD	0		;  INIT (WARNING)
-FNINIT:	.WORD	0		;W INIT (FENCE)
-DPINIT:	.WORD	0		;W INIT (DP)
+	.WORD	TASK-7		;  INIT (FENCE)
+	.WORD	PRGEND		;  INIT (DP)
 	.WORD	FORTH+8		;  INIT (VOC-LINK)
 ;
 ; *  END DATA USED BY COLD *
 ;
 	.WORD	0H,0B250H	;Z80 CPU NAME (HW,LW)
 				;(32 BIT BASE 36 INTEGER)
-
+;
 WP2SP:	.WORD	0		;original Tandy WP-2 stack pointer
-
+NODORG:	.WORD	0		;malloc node original
+NODCPY:	.WORD	0		;malloc node copy
+;
 	.EJECT
 ;	REGISTERS
 ;
@@ -2719,7 +2722,7 @@ DOVOC:	.WORD	TWOP
 FORTH:	.WORD	DODOE
 	.WORD	DOVOC
 	.WORD	0A081H
-	.WORD	DOTCPU-7	;COLD START VALUE ONLY.
+	.WORD	TASK-7		;COLD START VALUE ONLY.
 ;				CHANGED EACH TIME A DEF IS APPENDED
 ;				TO THE FORTH VOCABULARY
 	.WORD	0		;END OF VOCABULARY LIST
@@ -2802,8 +2805,9 @@ CLD:	LD	(WP2SP),SP	;save original stack pointer for BYE
 	LD	HL,0		;claim all available memory
 	CALL	MALLOC		;returns HL=address DE=#32-byte blocks
 	JR	C,BYEE		;an error occurred
-	LD	(FNINIT),HL	;fence value, cannot forget below allocated memory
-	LD	(DPINIT),HL	;our dictionary extends inside allocated memory
+	LD	BC,32		;point to (head) malloc node
+	SBC	HL,BC
+	LD	(NODORG),HL	;save its location
 	EX	DE,HL		;convert #32-byte blocks to #bytes
 	ADD	HL,HL
 	ADD	HL,HL
@@ -2811,7 +2815,8 @@ CLD:	LD	(WP2SP),SP	;save original stack pointer for BYE
 	ADD	HL,HL
 	ADD	HL,HL
 	EX	DE,HL
-	ADD	HL,DE		;calculate end of our memory
+	ADD	HL,DE		;calculate end of our usable memory
+	LD	(NODCPY),HL	;we'll copy the (head) malloc node right after
 ;
 	LD	(LIMIT+2),HL	;/ set LIMIT
 	LD	DE,BUFSIZ	;/ (DE)<--total disc buffer size
@@ -2833,12 +2838,35 @@ CLD:	LD	(WP2SP),SP	;save original stack pointer for BYE
 	LD	(TIBINI),HL	;/
 	LD	SP,HL		;/
 ;
-	CALL	CONINI
+	LD	HL,(NODORG)	;copy original malloc head node
+	LD	DE,(NODCPY)
+	LD	BC,32
+	LDIR
+	LD	HL,(NODCPY)	;point head node block # to copy
+	CALL	TOBLK
+	LD	(MHDBLK),HL	
+	CALL	CONINI		;initialize console
 ;
 	LD	BC,CLD1
 	LD	IX,NEXT		; POINTER TO NEXT
 	LD	IY,HPUSH	; POINTER TO HPUSH
 	JNEXT
+;
+;	Converts a RAM address in 8000h-FFFFh to a 32-byte-block number 0-3FFh.
+;
+TOBLK:	OR	A		;subtract start of RAM
+	LD	DE,08000h
+	SBC	HL,DE
+	XOR	A		;divide by 32
+	ADD	HL, HL
+	RLA
+	ADD	HL, HL
+	RLA
+	ADD	HL, HL
+	RLA
+	LD	L, H
+	LD	H, A
+	RET
 ;
 CLD1:	.WORD	COLD
 ;
@@ -2873,25 +2901,7 @@ COLD:	.WORD	DOCOL
 	.WORD	LIT
 	.WORD	FORTH+6
 	.WORD	STORE
-;
-;	Define no-op TASK within the dynamically allocated memory, so the user
-;	can safely FORGET it if desired.
-;
-	.WORD	FORTH,DEFIN	;make FORTH current and context vocabulary
-	.WORD	LIT,TASK	;place "TASK" + zero byte
-	.WORD	TIB,AT		;in text input buffer (TIB)
-	.WORD	LIT,5,CMOVE	;so CREATE can find it
-	.WORD	ZERO,INN,STORE	;set IN to start of TIB
-	.WORD	CREAT		;create empty dictionary entry
-	.WORD	LIT,DOCOL	;set CFA to DOCOL
-	.WORD	HERE,CFA,STORE	;
-	.WORD	LIT,SEMIS,COMMA	;set PFA to SEMIS
-	.WORD	SMUDG		;ensure it can be found
-;
 CLD2:	.WORD	ABORT
-;
-TASK:	.TEXT	"TASK"
-	.BYTE	0
 ;
 	.BYTE	84H		;S->D
 	.TEXT	"S->"
@@ -3813,6 +3823,13 @@ VLIS2:	.WORD	DUP
 	.BYTE	'E'+$80
 	.WORD	VLIST-8
 BYE:	.WORD	$+2
+	LD	HL,(NODORG)	;restore malloc head block #
+	CALL	TOBLK
+	LD	(MHDBLK),HL
+	LD	HL,(NODCPY)	;restore malloc head node
+	LD	DE,(NODORG)
+	LD	BC,32
+	LDIR
 	CALL	MFREE		;release memory back to system
 BYEE:	LD	SP,(WP2SP)	;restore system stack pointer
 	XOR	A		;program area can be returned to system
@@ -3929,4 +3946,11 @@ DOTCPU:	.WORD	DOCOL
 	.WORD	BASE,STORE
 	.WORD	SEMIS
 ;
+	.BYTE	84h		;TASK
+	.TEXT	"TAS"
+	.BYTE	'K'+$80
+	.WORD	DOTCPU-7
+TASK:	.WORD	DOCOL
+	.WORD	SEMIS
+
 PRGEND:	.END

@@ -242,26 +242,6 @@ Memory address 88DDh contains the block number of the head of the list. After
 an application (such as fig-FORTH) has run, the BIOS sets the head to block
 160h, which is RAM address AC00h or the application load address.
 
-Once fig-FORTH has loaded, you can examine the actual memory administration
-interactively:
-
-    HEX ok
-    88DD ? 240 ok                       ( head node at block 240h )
-    240 20 * 8000 + U. C800 ok          ( or address C800h )
-    C800 C@ EMIT SPACE u ok             ( block is marked used )
-    C801 ? 3F8 ok                       ( next node at block 3F8h )
-    3F8 20 * 8000 + U. FF00 ok          ( or address FF00h )
-
-    FF00 C@ EMIT SPACE U ok             ( block is marked U (?) )
-    FF01 ? 3F9 ok                       ( next node at block 3F9h )
-    3F9 20 * 8000 + U. FF20 ok          ( or address FF20 )
-
-    FF20 C@ EMIT SPACE U ok             ( block is marked U (?) )
-    FF21 ? 3FF ok                       ( final node at block 3FFh )
-    3FF 20 * 8000 + U. FFE0 ok          ( or address FFE0 )
-
-    FFE0 C@ EMIT SPACE S ok             ( stop, end of list )
-
 ### Impact on fig-FORTH
 
 Understanding the memory allocation was important because I wanted fig-FORTH
@@ -286,69 +266,75 @@ document or a RAM disk on the internal 32 Kb SRAM (not sure):
     +-----------+
     |           |
     | fig-FORTH |
-    |           |
+    |  binary   |
     +-----------+ AC00h
     |           |
     /           /
     |           |
     +-----------+ 0000h
 
-This means I cannot simply assume all subsequent RAM is available to me: the head node
-sits in the middle, so I have to step over it, and there may be memory used at the top,
-not in the least the administration of the end of the malloc list itself.
+This means I cannot simply assume all subsequent RAM is available to me: the
+malloc head node sits squarely in the middle.
 
-Therefore, upon initializing fig-FORTH (a cold start, there is no way to perform a
-warm start as of yet), I ask the BIOS to give me all available memory by invoking
-`MALLOC` with HL set to zero. On exit, HL will point to the beginning of this data,
-and DE will contain the number of 32-byte blocks allocated to me. From these I can
-deduce what fig-FORTH can use, for example:
+There are two approaches to deal with this, both of which I implemented:
 
-    +-----------+ FFFFh
-    | RAM disk? |
-    +-----------+ LIMIT
-    | allocated |
-    |    to     |
-    | fig-FORTH |
-    +-----------+ FENCE = DP
-    | head node |
-    +-----------+
-    |           |
-    | fig-FORTH |
-    |           |
-    +-----------+ AC00h
-    |           |
-    /           /
-    |           |
-    +-----------+ 0000h
+1. Let the head node sit there and work around it.
 
-It then proceeds to set a few user variables to remember not to step outside these
-boundaries:
+    This means we have to set `FENCE` and `DP` right above the head node. Also,
+    since the sole purpose of the `TASK` word is that it can be forgotten via
+    `FORGET`, we have to place that above `FENCE`. That means we cannot
+    _statically_ define `TASK` in the assembly listing, but the cold start
+    routine has to _dynamically_ create `TASK` as its final act.
 
-User variable | Need to set because...
---------------|-----------------------
-`LIMIT`       | Don't want to cross upper boundary of allocated RAM.
-`FENCE`       | Cannot forget below allocated RAM.
-`DP`          | User dictionary starts at beginning of allocated RAM.
+    The memory map would then look like this: 
 
-At a cold start, the `TASK` word is the last word added to the dictionary. All
-user-defined words follow it. Its purpose is that the user can `FORGET` it and
-thereby easily discard all her self-defined words.
+        +-----------+ FFFFh
+        | RAM disk? |
+        +-----------+ LIMIT
+        | allocated |
+        |    to     |
+        | fig-FORTH | TASK, DP
+        +-----------+ FENCE
+        | head node |
+        +-----------+
+        |           |
+        | fig-FORTH |
+        |  binary   |
+        +-----------+ AC00h
+        |           |
+        /           /
+        |           |
+        +-----------+ 0000h
 
-For that to work, I had to place `TASK` inside the allocated memory, or `FENCE`
-would prevent the user from forgetting it, making it completely useless. That
-is why `COLD` _dynamically_ creates `TASK` as one of its last acts.
+    This works fine, but the 32-byte head node we have to step around is
+    annoying.
 
-You can see the effect from fig-FORTH -- in this example, the assembled
-fig-FORTH binary occupied up to address C7F8h:
+2. Move the head node.
 
-    HEX ok
-    LIMIT U. FF00 ok             ( FF00h and above is off-limits to us )
-    FENCE @ U. C820 ok           ( we cannot FORGET below C820h )
-    ' TASK NFA @ U. C820 ok      ( the first dynamically created word is there )
-    ' .CPU NFA @ U. C7D3 ok      ( the last statically created word is at C7D3 )
+    This is the approach I went with in the end. After all memory has been
+    allocated, I actively move the head node to the end of the memory allocated
+    to me, and claim the 32 bytes it occupied for myself. I also update the
+    head block number, just for consistency. When terminating, I revert this
+    process. This way we end up with a nice, contiguous memory space, and we
+    can define `TASK` in the assembly code as usual:
 
-    88DD ? 240 ok                ( head malloc node is at block 240h )
-    240 20 * 8000 + U. C800 ok   ( right in between .CPU and TASK )
+        +-----------+ FFFFh
+        | RAM disk? |
+        +-----------+
+        | head node |
+        +-----------+ LIMIT
+        | allocated |
+        |    to     |
+        | fig-FORTH |
+        +-----------+ DP
+        |           | TASK, FENCE
+        | fig-FORTH |
+        |  binary   |
+        +-----------+ AC00h
+        |           |
+        /           /
+        |           |
+        +-----------+ 0000h
 
 ## ROM Version
 
@@ -358,7 +344,7 @@ My Tandy WP-2 reports the following ROM versions:
     Copyright 1989 Something Good Inc. V1.54
     Copyright 1989 Microlytics,UFO,Xerox V4.7
 
-Online I have also seen photos of WP-2 with the second line reading:
+Online I have also seen photos of WP-2's with the second line reading:
 
     Copyright 1989 Something Good Inc. V1.62
 
