@@ -20,7 +20,7 @@ Then:
 4. Use the arrow keys up/down to highlight `figforth.ex` and press `F2` + `7` (RUN).
 
 After a few seconds of transferring the binary over, the Forth prompt should appear and you can
-program way on your WP-2:
+program away on your WP-2:
 
 ![Forth Prompt](img/forth-wp2.jpg)
 
