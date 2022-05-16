@@ -25,7 +25,7 @@ CLOSE	.EQU	0191h		;close a file
 ;	screen, of exactly 1,024 bytes, named SCRN0000.FTH up to SCRNFFFF.FTH.
 ;
 DEFFCB:	.BYTE	011h		;device (1=memory, 2=internal RAM disk, 3=IC RAM, 11h=drive A)
-	.TEXT	"SCRN????.FTH"	;filename, not zero-terminated; supports up to 64K screens
+	.TEXT	"SCREEN??.FTH"	;filename, not zero-terminated; supports up to 64K screens
 	.WORD	16*64		;one screen size
 	.BLOCK	17		;reserved
 ;
@@ -103,7 +103,7 @@ MTBUF:	.WORD	DOCOL,FIRST
 	.BYTE	'0'+$80
 	.WORD	MTBUF-10H
 DRZER:	.WORD	DOCOL
-	.WORD	ZERO
+	.WORD	LIT,0200h	;02h=internal RAM disk
 	.WORD	OFSET,STORE
 	.WORD	SEMIS
 ;
@@ -112,14 +112,23 @@ DRZER:	.WORD	DOCOL
 	.BYTE	'1'+$80
 	.WORD	DRZER-6
 DRONE:	.WORD	DOCOL
-	.WORD	LIT,1600	;Osborne DD
-DRON2:	.WORD	OFSET,STORE
+	.WORD	LIT,01100h	;11h=floppy disk drive A
+	.WORD	OFSET,STORE
+	.WORD	SEMIS
+;
+	.BYTE	83H		;DR2
+	.TEXT	"DR"
+	.BYTE	'2'+$80
+	.WORD	DRONE-6
+DRTWO:	.WORD	DOCOL
+	.WORD	LIT,0300h	;03h=IC RAM disk
+	.WORD	OFSET,STORE
 	.WORD	SEMIS
 ;
 	.BYTE	86H		;BUFFER
 	.TEXT	"BUFFE"
 	.BYTE	'R'+$80
-	.WORD	DRONE-6
+	.WORD	DRTWO-6
 BUFFE:	.WORD	DOCOL,USE
 	.WORD	AT,DUP
 	.WORD	TOR
@@ -202,7 +211,8 @@ BIOS1:	CALL	0		;self-modified address
 ;
 ;	Reads a block of data from a disc. For reasons mentioned above, each
 ;	screen equals one block of 1,024 bytes, which is stored in its own
-;	file.
+;	file. The high byte of the block number (via OFFSET) contains the
+;	drive to use.
 ;
 	.BYTE	83H		;R/W
 	.TEXT	"R/"
@@ -210,55 +220,82 @@ BIOS1:	CALL	0		;self-modified address
 	.WORD	BIOS-7
 RSLW:	.WORD	DOCOL
 ;
+;	Update drive in FCB.
+;
+	.WORD	SWAP				;block number on top
+	.WORD	LIT,256				;divide by 256
+	.WORD	SLMOD				;leaving low and high byte
+	.WORD	FCB,CSTOR			;store high byte as drive
+	.WORD	SWAP				;and low byte as block number
+;
 ;	Update filename in FCB.
 ;
 	.WORD	SWAP
-	.WORD	FCB,LIT,5,PLUS			;point to ???? in FCB
+	.WORD	FCB,LIT,7,PLUS			;point to ?? in FCB
 	.WORD	SWAP,ZERO			;convert SCR # to double
 	.WORD	BASE,AT,TOR,HEX			;save BASE and go HEX
-	.WORD	BDIGS,DIG,DIG,DIG,DIGS,EDIGS	;convert SCR # to 4 hex digits
+	.WORD	BDIGS,DIG,DIGS,EDIGS		;convert SCR # to 2 hex digits
 	.WORD	FROMR,BASE,STORE		;restore BASE
 	.WORD	ROT,SWAP,CMOVE
 ;
 ;	Read functionality.
 ;
 	.WORD	ONE,EQUAL,ZBRAN			;check if f=1 (read)
-	.WORD	RSLW2-$				;IF
+	.WORD	RSLW3-$				;IF
 	.WORD	ZERO,FCB,TWO,LIT,OPEN,BIOS	;open screen file
-	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
-	.WORD	LIT,8,QERR			;error out if necessary
-	.WORD	LIT,8,ZERO			;read 8 sectors
+	.WORD	ZBRAN				;if success, read
+	.WORD	RSLW1-$				;else fill screen
+;
+;	Read: file does not exist.
+;
+	.WORD	LIT,1024,BLANK			;clear the screen
+	.WORD	BRAN
+	.WORD	RSLW7-$
+;
+;	Read: file exists.
+;
+RSLW1:	.WORD	LIT,8,ZERO			;read 8 sectors
 	.WORD	XDO
-RSLW1:	.WORD	DUP,FCB,ZERO,LIT,READ,BIOS	;read a sector of 128 bytes
+RSLW2:	.WORD	DUP,FCB,ZERO,LIT,READ,BIOS	;read a sector of 128 bytes
 	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
 	.WORD	LIT,8,QERR			;error out if necessary
 	.WORD	LIT,128,PLUS			;advance data buffer
 	.WORD	XLOOP				;next sector
-	.WORD	RSLW1-$
+	.WORD	RSLW2-$
+	.WORD	DROP				;drop address
 	.WORD	BRAN
-	.WORD	RSLW4-$				;ELSE
+	.WORD	RSLW6-$				;ELSE
 ;
 ;	Write functionality.
 ;
-RSLW2:	.WORD	ZERO,FCB,ZERO,LIT,OPEN,BIOS	;open screen file
+RSLW3:	.WORD	ZERO,FCB,ONE,LIT,OPEN,BIOS	;open existing screen file
+	.WORD	ZBRAN
+	.WORD	RSLW4-$
+;
+;	Write: file does not exist.
+;
+	.WORD	ZERO,FCB,ZERO,LIT,OPEN,BIOS	;create new screen file
 	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
 	.WORD	LIT,8,QERR			;error out if necessary
-	.WORD	LIT,8,ZERO			;write 8 sectors
+;
+;	Write: file exists.
+;
+RSLW4:	.WORD	LIT,8,ZERO			;write 8 sectors
 	.WORD	XDO
-RSLW3:	.WORD	DUP,FCB,ZERO,LIT,WRITE,BIOS	;write a sector of 128 bytes
+RSLW5:	.WORD	DUP,FCB,ZERO,LIT,WRITE,BIOS	;write a sector of 128 bytes
 	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
 	.WORD	LIT,8,QERR			;error out if necessary
 	.WORD	LIT,128,PLUS			;advance data buffer
 	.WORD	XLOOP				;next sector
-	.WORD	RSLW3-$
+	.WORD	RSLW5-$
+	.WORD	DROP				;drop address
 ;
 ;	Close file.
 ;
-RSLW4:	.WORD	DROP				;ENDIF
-	.WORD	FCB,ZERO,ZERO,LIT,CLOSE,BIOS	;close screen file
+RSLW6:	.WORD	FCB,ZERO,ZERO,LIT,CLOSE,BIOS	;ENDIF, close screen file
 	.WORD	DUP,DSKERR,STORE		;update DISK-ERROR
 	.WORD	LIT,8,QERR			;error out if necessary
-	.WORD	SEMIS
+RSLW7:	.WORD	SEMIS
 ;
 	.BYTE	85H		;FLUSH
 	.TEXT	"FLUS"

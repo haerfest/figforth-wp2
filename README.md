@@ -36,9 +36,15 @@ while on the go :)
 
 ## Storage
 
-The storage interface at the moment only supports the "Drive A", i.e., the (TPDD) floppy drive.
+Each screen of 1,024 bytes is stored in a single file named `SCREEN??.FTH`, where the `??` is the zero-padded screen number in hexadecimal. This allows for 256 screens or 256 Kb storage per drive.
 
-Each screen of 1,024 bytes is stored in a single file named `SCRN????.FTH`, where the `????` is the zero-padded screen number in hexadecimal. This allows in theory for up to 65,536 screens.
+When loading or saving screens, you can switch drives with these words:
+
+Word  | Drive
+------|----------------------------------------------------
+`DR0` | Internal RAM drive (32 Kb or 128 Kb socketed chip).
+`DR1` | Floppy disk / drive A / TPDD.
+`DR2` | IC RAM card in expansion slot.
 
 ## Notes
 
