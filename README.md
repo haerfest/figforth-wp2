@@ -34,6 +34,16 @@ Highly recommended is to install a [128 Kb SRAM memory upgrade](http://tandy.wik
 in the WP-2 to act as a RAM drive. You can then copy the executable to it and run it from there
 while on the go :)
 
+## Screen Output
+
+Because the WP-2's LCD only shows eight lines of output, I took a hint from the Commodore 64.
+You can press the following keys while lines are being printed to the screen:
+
+Key     | Effect
+--------|----------------------------------------------------
+`Ctrl`  | Pauses briefly before printing the next line.
+`Shift` | Pauses printing the next line until released again.
+
 ## Storage
 
 Each screen of 1,024 bytes is stored in a single file named `SCREEN??.FTH`, where the `??` is the zero-padded screen number in hexadecimal. This allows for 256 screens or 256 Kb storage per drive.
