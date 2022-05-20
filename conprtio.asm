@@ -13,6 +13,7 @@
 BEEP	.EQU	0121H		;beep a buzzer
 CHARGET	.EQU	0103H		;get one character (wait for input)
 CHAROUT	.EQU	0118H		;output character to console
+CHARSNS	.EQU	0100H		;check keyboard buffer
 CHKCNCL	.EQU	0124H		;check that CNCL key is pressed now
 CLS	.EQU	011EH		;clear screen
 CURSON	.EQU	010FH		;set cursor on/off
@@ -20,6 +21,7 @@ CURSTYP	.EQU	0112H		;set cursor type
 GETLOC	.EQU	010CH		;get cursor location
 KILLBUF	.EQU	0106H		;kill key buffer
 SETLOC	.EQU	0109H		;set cursor location
+WAIT	.EQU	01A0H		;wait in 1/100th of a second
 ;
 ;	Memory locations accessed by the Tandy WP-2 console interface
 ;
@@ -54,6 +56,7 @@ PEMIT:	.WORD	$+2		;(EMIT) orphan
 	LD	A,H		;was X<79?
 	CP	79
 	JR	C,PEMITE
+	CALL	CHKPAUS		;slow down if desired
 	LD	A,L		;was Y<7?
 	CP	7
 	JR	C,PEMITE
@@ -75,7 +78,8 @@ PCR:	CALL	GETLOC
 ;
 ;	Performs a line feed.
 ;
-PLF:	CALL	GETLOC		;set cursor Y=Y+1
+PLF:	CALL	CHKPAUS		;slow down if desired
+	CALL	GETLOC		;set cursor Y=Y+1
 	INC	L
 	LD	A,L
 	CP	8
@@ -153,6 +157,17 @@ SCROLL:	PUSH	BC
 	POP	HL
 	POP	BC
 	RET
+;
+;	Pause while Shift pressed, and a little while when Ctrl pressed
+;
+CHKPAUS	CALL	CHARSNS		;check keys
+	LD	A,L
+	AND	00011100B	;check Ctrl and both Shift keys
+	RET	Z		;none of them pressed
+CHKSHFT	AND	00011000B	;Shift keys pressed?
+	JR	NZ,CHKPAUS	;yes, loop
+	LD	A,10		;no, Ctrl pressed, wait
+	JP	WAIT		; A/100th of a second
 ;
 ;	Read a key from the keyboard
 ;
