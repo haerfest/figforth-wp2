@@ -144,6 +144,8 @@ PBELL:	XOR	A		;0=low beep, 1=high beep
 ;
 SCROLL:	PUSH	BC
 	PUSH	HL
+	CALL	GETLOC		;a trick to reset the cursor
+	CALL	SETLOC		; to the hidden phase
 	LD	BC,7*480	;copy 7 lines
 	LD	HL,VRAM+480	;from lines 1-7
 	LD	DE,VRAM		;to lines 0-6

@@ -84,11 +84,72 @@ And had we written it to the third RAM address (9902h) instead, we would have go
     # . . . # . # . . . # . # . . . # . # . . . # .
     . . . . . . . . . . . . . . . . . . . . . . . .
 
+The 480 x 64 monochrome pixels need 30,720 bits or 3,840 bytes (3.75 Kb) of RAM.
+The LCD controller is configured by the BIOS to find it at 9900h - A7FFh.
+
+## Cursor
+
 The LCD supports a hardware cursor 8 pixels wide, but obviously the WP-2 does not use
 that but instead implements a software cursor 6 pixels wide.
 
-The 480 x 64 monochrome pixels need 30,720 bits or 3,840 bytes (3.75 Kb) of RAM.
-The LCD controller is configured by the BIOS to find it at 9900h - A7FFh.
+Two types of blinking software cursors are supported:
+
+1. A block cursor, which inverts a full 6x8 character cell:
+
+        # # # # # #
+        # # # # # #
+        # # # # # #
+        # # # # # #
+        # # # # # #
+        # # # # # #
+        # # # # # #
+        # # # # # #
+
+2. An "underline" cursor, which inverts the lower half of a 6x8 character cell:
+
+        . . . . . .
+        . . . . . .
+        . . . . . .
+        . . . . . .
+        # # # # # #
+        # # # # # #
+        # # # # # #
+        # # # # # #
+
+There is a `SETCUTSORTYPE` (sic) call to select one or the other, but they
+mix up the values you have to specify in the `A` register. This is what you
+have to specify to get a particular cursor type:
+
+`A` | Cursor Type
+----|------------------
+0   | Underline cursor.
+1   | Block cursor.
+
+Another call is `SETCURSORONOFF` to enable or disable the cursor. Correctly
+but confusingly you have to set `A` to zero to switch it _on_, and to one to
+switch it _off_.
+
+The service manual states:
+
+> 1: cursor blink off
+> (no cursor on screen)
+
+However, switching the cursor off does not hide it _immediately_. It just
+sets or clears a bit in memory location 8403h, which holds the "console
+controller status", and that's it. The cursor's phase does appear to be
+updated until a call to at least `CHARSENSE` or `CHARGET` is made.
+
+Before scrolling the screen, I needed to ensure any active cursor was
+truly in its hidden phase, or otherwise the scrolling would also copy the
+visible software cursor one line up. A trick to ensure it is in its hidden
+phase is to simply set the cursor position to where it already is, by
+calling `GETLOC` and `SETLOC` in succession:
+
+    CALL GETLOC     ; cursor (x,y) will be in HL
+    CALL SETLOC     ; this resets the cursor phase to hidden
+
+Each call to `SETLOC` will start with setting the cursor to its hidden
+phase.
 
 ## ROM Paging
 
@@ -174,8 +235,8 @@ Or graphically:
     +---+---+---+---+---+---+---+--/--+---+---+
     0   1   2   3   4   5                31  32  offset
 
-A node's status is represented by the ASCII code of a character, which at the
-look of it have a bearing on English words. The following are used by the BIOS:
+A node's status is represented by the ASCII code of a character, which by the
+look of it has a bearing on English words. The following are used by the BIOS:
 
 Status | Meaning
 -------|--------
@@ -240,7 +301,7 @@ allocate 64 bytes, DE will equal two on return.
 
 Memory address 88DDh contains the block number of the head of the list. After
 an application (such as fig-FORTH) has run, the BIOS sets the head to block
-160h, which is RAM address AC00h or the application load address.
+160h, which is RAM address AC00h, that is, the application load address.
 
 ### Impact on fig-FORTH
 
@@ -250,7 +311,7 @@ to the system without needing a reboot.
 
 When fig-FORTH is loaded by the BIOS, starting at address AC00h, and ending
 about 7 Kb (the size of the `figforth.ex` binary) later, the BIOS immediately
-places its memory administration head node there!
+places its memory administration head node after it.
 
 Also, at the top of RAM there seems to be some space used for the resident
 document or a RAM disk on the internal 32 Kb SRAM (not sure):
